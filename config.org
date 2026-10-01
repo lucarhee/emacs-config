@@ -1,0 +1,39 @@
+#+title: Doomemacs 설정
+* 차례
+* 테마와 글꼴 설정
+#+begin_src elisp
+(setq doom-font (font-spec :family "JetBrainsMono Nerd Font" :size 15)
+      doom-variable-pitch-font (font-spec :family "Noto Sans CJK KR" :size 15))
+(after! doom-ui
+  ;; 고정폭 (코드블록)
+  (set-fontset-font t 'hangul
+                    (font-spec :family "D2CodingLigature Nerd Font" :size 15))
+  ;; 심볼 fallback
+  (set-fontset-font t 'symbol
+                    (font-spec :family "Symbols Nerd Font Mono") nil 'append))
+;; 줄높이 불일치를 약간의 여유를 줘서 해결
+(setq-default line-spacing 0.1)
+#+end_src
+* org 설정
+#+begin_src elisp
+(after! org-modern
+  ;; 헤딩 bullets
+  (setq org-modern-fold-stars '(("▶" . "▼") ("▷" . "▽") ("■" . "●") ("□" . "○") ("▣" . "◎")))
+
+
+  ;; 테이블, 블록 등 스타일
+  (setq org-modern-table nil ;; 표가 안 이뻐서 끔.
+        org-modern-block t
+        org-modern-keyword t
+        org-modern-timestamp t))
+
+(after! org
+  (global-org-modern-mode))
+
+;; 한글 조사가 붙어도 꾸밈이 적용되게 한다.
+(after! org
+  (setcar (nthcdr 1 org-emphasis-regexp-components)
+          "-[:alnum:][:space:].,:!?;'\")}\\[가-힣")
+  (org-set-emph-re 'org-emphasis-regexp-components
+                   org-emphasis-regexp-components))
+#+end_src
