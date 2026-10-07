@@ -344,3 +344,195 @@
 
 (add-hook 'evil-insert-state-exit-hook
           (lambda () (my/im-select my/default-im)))
+
+;; ============================================================
+;; Daily Writing Statistics
+;; ============================================================
+
+(defvar my/daily-writing-stats-file
+  (expand-file-name "~/org/daily-writing-stats.csv")
+  "하루 글쓰기 통계를 저장할 CSV 파일.")
+
+
+(defun my/get-daily-writing-stats ()
+  "오늘 수정된 Org 파일의 편수와 글자 수를 반환한다.
+
+반환값:
+  (FILE-COUNT . TOTAL-CHARS)"
+  (let* ((org-root
+          (or (bound-and-true-p org-directory)
+              (expand-file-name "~/org/")))
+         (today
+          (format-time-string "%Y-%m-%d"))
+         (total-chars 0)
+         (file-count 0))
+
+    (when (file-directory-p org-root)
+
+      (dolist (file
+               (directory-files-recursively
+                org-root
+                "\\.org$"))
+
+        (when (file-regular-p file)
+
+          (let* ((attrs
+                  (file-attributes file))
+                 (mod-time
+                  (format-time-string
+                   "%Y-%m-%d"
+                   (file-attribute-modification-time attrs))))
+
+            (when (string= mod-time today)
+
+              (setq file-count
+                    (1+ file-count))
+
+              (with-temp-buffer
+                (insert-file-contents file)
+
+                (setq total-chars
+                      (+ total-chars
+                         (- (point-max)
+                            (point-min))))))))))
+
+    (cons file-count total-chars)))
+
+
+(defun my/save-daily-writing-stats ()
+  "오늘의 글쓰기 통계를 CSV 파일에 저장한다."
+  (interactive)
+
+  (let* ((today
+          (format-time-string "%Y-%m-%d"))
+         (stats
+          (my/get-daily-writing-stats))
+         (file-count
+          (car stats))
+         (total-chars
+          (cdr stats))
+         (csv-file
+          my/daily-writing-stats-file))
+
+    ;; CSV 파일이 없으면 헤더 생성
+    (unless (file-exists-p csv-file)
+      (with-temp-file csv-file
+        (insert "date,file_count,total_chars\n")))
+
+    ;; 기존 CSV 읽기
+    (with-temp-buffer
+
+      (insert-file-contents csv-file)
+
+      (goto-char (point-min))
+
+      ;; 오늘 날짜의 행이 존재하는지 확인
+      (if (re-search-forward
+           (concat "^"
+                   (regexp-quote today)
+                   ",.*$")
+           nil
+           t)
+
+          ;; --------------------------------------------
+          ;; 오늘 기록이 있으면 갱신
+          ;; --------------------------------------------
+
+          (replace-match
+           (format "%s,%d,%d"
+                   today
+                   file-count
+                   total-chars))
+
+        ;; --------------------------------------------
+        ;; 오늘 기록이 없으면 새 행 추가
+        ;; --------------------------------------------
+
+        (goto-char (point-max))
+
+        (unless (bolp)
+          (insert "\n"))
+
+        (insert
+         (format "%s,%d,%d\n"
+                 today
+                 file-count
+                 total-chars)))
+
+      ;; CSV 저장
+      (write-region
+       (point-min)
+       (point-max)
+       csv-file))
+
+    ;; 결과 출력
+    (message
+     "📊 [%s] 작성/수정 글: %d편 | 총 글자 수: %d자"
+     today
+     file-count
+     total-chars)))
+
+
+;; ============================================================
+;; 단축키
+;; ============================================================
+
+(map! :leader
+      :prefix "m"
+      (:after org
+              "w s" #'my/save-daily-writing-stats))
+
+
+;; ============================================================
+;; 자동 실행 타이머
+;; 매 시각 00분에 실행
+;; ============================================================
+
+(defvar my/daily-writing-stats-timer nil
+  "글쓰기 통계 자동 저장 타이머.")
+
+
+(defun my/start-daily-writing-stats-timer ()
+  "매 시각 정각에 글쓰기 통계를 자동 저장한다."
+
+  ;; Doom reload 시 기존 타이머 제거
+  (when (timerp my/daily-writing-stats-timer)
+    (cancel-timer my/daily-writing-stats-timer))
+
+  (let* ((now
+          (current-time))
+
+         (current-hour
+          (string-to-number
+           (format-time-string "%H" now)))
+
+         (next-hour
+          (1+ current-hour))
+
+         (month
+          (string-to-number
+           (format-time-string "%m" now)))
+
+         (year
+          (string-to-number
+           (format-time-string "%Y" now))))
+
+    ;; 다음 정각부터 1시간마다 실행
+    (setq my/daily-writing-stats-timer
+          (run-at-time
+           (encode-time
+            0                  ; 초
+            0                  ; 분
+            0                  ; 시
+            next-hour
+            month
+            year)
+
+           ;; 1시간
+           (* 60 60)
+
+           #'my/save-daily-writing-stats))))
+
+
+(after! org
+  (my/start-daily-writing-stats-timer))
