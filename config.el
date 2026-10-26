@@ -209,6 +209,14 @@
           (tags   . " %i %-14:c")
           (search . " %i %-14:c"))))
 
+(defun my/skip-unless-in-writing-section ()
+  "데일리의 '* 글' 섹션 아래가 아닌 항목은 agenda에서 건너뛴다."
+  (let ((next (save-excursion (or (outline-next-heading) (point-max)))))
+    (save-excursion
+      (unless (and (org-up-heading-safe)
+                   (equal (org-get-heading t t t t) "글"))
+        next))))
+
 (setq org-agenda-custom-commands
       '(;; 매일 아침/작업 중: "지금 뭘 하지?"
         ("d" "오늘"
@@ -242,9 +250,11 @@
         ;; 노트로 승격했거나 처음부터 노트로 쓴 글은 SPC n S
         ("W" "데일리 글 모아보기"
          ((tags "writing+LEVEL=2"
+                ;; 로그에 writing 분류로 남긴 한 줄은 빼고, '글' 섹션의 글만
                 ((org-agenda-files
                   (directory-files-recursively
                    (expand-file-name "roam/daily" org-directory) "\\.org\\'"))
+                 (org-agenda-skip-function #'my/skip-unless-in-writing-section)
                  (org-agenda-prefix-format " %-12:c ")
                  (org-agenda-overriding-header "✏️  데일리의 짧은 글")))))
 
@@ -300,6 +310,40 @@
   "캡처 타겟: tasks.org 의 분류(생활/행정/연락...)를 고른다."
   (set-buffer (org-capture-target-buffer (my/org-path "tasks.org")))
   (my/capture--goto-top-heading "분류: "))
+
+;; ─── 캡처 창에서 vim 식으로 저장/종료 ─────────────────
+;; 캡처 창(SPC X …, SPC n W/l)은 파일이 아니라 임시 버퍼라서 :w 가 실패하고,
+;; 그대로 :q 하면 캡처가 취소돼 쓴 글이 사라진다. 그래서 캡처 창에서는
+;;   :w        저장만 (창은 계속 열림)     :wq  :x  ZZ  → 저장하고 닫기
+;;   :q        내용이 있으면 저장할지 묻기   :q!  ZQ      → 버리고 닫기
+;; (C-c C-c / C-c C-k 도 그대로 동작)
+(defun my/capture-buffer-p ()
+  (bound-and-true-p org-capture-mode))
+
+(defun my/capture-save-in-place ()
+  "캡처 창을 닫지 않고 지금까지 쓴 내용을 대상 파일에 저장."
+  (let ((base (buffer-base-buffer)))
+    (when (and base (buffer-file-name base))
+      (with-current-buffer base (save-buffer))
+      (message "저장됨 (닫으려면 :wq)"))))
+
+(defun my/evil-capture-finalize-a (orig &rest args)
+  (if (my/capture-buffer-p) (org-capture-finalize) (apply orig args)))
+
+(defun my/evil-capture-write-a (orig &rest args)
+  (if (my/capture-buffer-p) (my/capture-save-in-place) (apply orig args)))
+
+(defun my/evil-capture-quit-a (orig &optional force &rest args)
+  (cond ((not (my/capture-buffer-p)) (apply orig force args))
+        (force (org-capture-kill))
+        ((y-or-n-p "쓴 내용을 저장할까요? ") (org-capture-finalize))
+        (t (org-capture-kill))))
+
+(after! evil
+  (advice-add 'evil-save-and-close :around #'my/evil-capture-finalize-a)          ; :wq
+  (advice-add 'evil-save-modified-and-close :around #'my/evil-capture-finalize-a) ; :x ZZ
+  (advice-add 'evil-write :around #'my/evil-capture-write-a)                      ; :w
+  (advice-add 'evil-quit :around #'my/evil-capture-quit-a))                       ; :q :q! ZQ
 
 (after! org
   (setq org-capture-templates
@@ -593,7 +637,7 @@
            :target (file+head "%<%Y-%m-%d>.org" ,my/daily-head)
            :unnarrowed t)
           ("l" "log" entry
-           "* %<%H:%M> %^{무엇을 했나} :%^{분류|novel|course|dev|image|video|admin}:\n%?"
+           "* %<%H:%M> %^{무엇을 했나} :%^{분류|novel|course|dev|image|video|writing|admin}:\n%?"
            :target (file+head+olp "%<%Y-%m-%d>.org" ,my/daily-head ("로그")))
           ;; 짧은 글. 제목은 비워도 된다 (Enter). C-c C-c 로 저장, C-c C-k 로 취소
           ("w" "글" entry
